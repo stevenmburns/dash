@@ -41,9 +41,6 @@ df = pd.DataFrame( data=[ [10,1],[5,2],[2,5],[1,10]], columns=['area','hpwl'])
 
 fig = px.scatter(df, x="area", y="hpwl", width=600, height=600)
 
-
-fig1 = go.Figure()
-
 app.layout = html.Div([
     dcc.Graph(
         id='area-vs-hpwl',
@@ -52,7 +49,6 @@ app.layout = html.Div([
     ),
     dcc.Graph(
         id='Placement',
-        figure=fig1,
         style={'display': 'inline-block'}
     ),
 ])
@@ -79,6 +75,11 @@ def display_hover_data(hoverData):
 
     for named_rect in placements[idx]:
         gen_trace_xy( named_rect)
+
+    fig1.update_yaxes(
+        scaleanchor='x',
+        scaleratio = 1
+    )
 
     fig1.update_layout(
         autosize=False,
