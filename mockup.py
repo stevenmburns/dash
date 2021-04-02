@@ -41,53 +41,60 @@ df = pd.DataFrame( data=[ [10,1],[5,2],[2,5],[1,10]], columns=['area','hpwl'])
 
 fig = px.scatter(df, x="area", y="hpwl", width=600, height=600)
 
+fig.update_traces( marker=dict(size=12))
+fig.update_xaxes( rangemode="tozero")
+fig.update_yaxes( rangemode="tozero")
+
 app.layout = html.Div([
-    dcc.Graph(
-        id='area-vs-hpwl',
-        figure=fig,
-        style={'display': 'inline-block'}
-    ),
-    dcc.Graph(
-        id='Placement',
-        style={'display': 'inline-block'}
-    ),
+    html.Div([
+        html.H2(children='Pareto Frontier'),
+        dcc.Graph(
+            id='area-vs-hpwl',
+            figure=fig
+        )
+    ], style={'display': 'inline-block'}),
+    html.Div([    
+        html.H2(children='Placement'),
+        dcc.Graph(
+            id='Placement'
+        )
+    ], style={'display': 'inline-block'})
 ])
 
 @app.callback(
     Output('Placement', 'figure'),
     Input('area-vs-hpwl', 'hoverData'))
 def display_hover_data(hoverData):
-    fig1 = go.Figure()
+    fig = go.Figure()
 
     if hoverData is None:
-        return fig1
+        return fig
 
     points = hoverData['points']
     assert 1 == len(points)
     idx = points[0]['pointNumber']
 
-    def gen_trace_xy( named_rect):
-        nm, rect = named_rect
-        (x0, y0), (x1, y1) = rect
+    for named_rect in placements[idx]:
+        nm, ((x0, y0), (x1, y1)) = named_rect
         x = [x0, x1, x1, x0, x0]
         y = [y0, y0, y1, y1, y0]
-        fig1.add_trace( go.Scatter(x=x,y=y, mode='lines', fill='toself', showlegend=False, name=f'{nm}'))
+        fig.add_trace( go.Scatter(x=x, y=y,
+                                   mode='lines', fill='toself',
+                                   showlegend=False,
+                                   name=f'{nm}'))
 
-    for named_rect in placements[idx]:
-        gen_trace_xy( named_rect)
-
-    fig1.update_yaxes(
+    fig.update_yaxes(
         scaleanchor='x',
         scaleratio = 1
     )
 
-    fig1.update_layout(
+    fig.update_layout(
         autosize=False,
         width=600,
         height=600
     )
 
-    return fig1
+    return fig
 
 
 if __name__ == '__main__':
