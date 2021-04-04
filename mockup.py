@@ -8,9 +8,12 @@ from dash.dependencies import Input, Output
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
+import itertools
+import random
 
 from transformation import Transformation as Tr
 from transformation import Rect
+from collections import defaultdict
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -111,50 +114,98 @@ def polish( expr):
     """
     [ 'v', 'h', C, D, 'h', A, B]
 """
+    stack = []
+    for idx,x in reversed(list(enumerate(expr))):
+        if x == 'v' or x == 'h':
+            assert len(stack) >= 2
+            e0 = stack.pop()
+            e1 = stack.pop()
+            if x == 'v':
+                stack.append( block_v( f'w{idx}', [e1,e0]))
+            elif x == 'h':
+                stack.append( block_h( f'w{idx}', [e0,e1]))
+            else:
+                assert False, x
+        else:
+            stack.append( x)
     
+    assert 1 == len(stack)
+    return stack[0]
+
+def all_possible_trees(n):
+    if n == 1:
+        yield 'l'
+    for split in range(1, n):
+        gen_left = all_possible_trees(split)
+        gen_right = all_possible_trees(n-split)
+        for left, right in itertools.product(gen_left, gen_right):
+            yield 'o' + left + right
+
+def all_possible_polish_strings(s):
+    n = len(s)
+    g0 = all_possible_trees(n)
+    g1 = itertools.product( *([['h','v']]*(n-1)))
+    g2 = itertools.permutations(s)
+    
+    for t, os, ls in itertools.product( g0, g1, g2):
+        r, i1, i2 = '', 0, 0
+        for c in t:
+            if c == 'o':
+                r += os[i1]
+                i1 += 1
+            elif c == 'l':
+                r += ls[i2]
+                i2 += 1
+
+        assert i1 == len(os)
+        assert i2 == len(ls)
+
+        yield r
+
+def test_A():
+    lst = list(all_possible_polish_strings("ABCD"))
+    s = set(lst)
+    assert len(lst) == len(s)
 
 def build_block():
     A = Block( "A", w=2, h=3)
     B = Block( "B", w=3, h=4)
     C = Block( "C", w=3, h=8)
     D = Block( "D", w=2, h=1)
-    return A, B, C, D
+    E = Block( "E", w=4, h=7)
+    return A, B, C, D, E
 
-def build_block0():
-    A, B, C, D = build_block()
-    return block_v( "top", [block_h( "mid0", [C,D]),block_h( "mid1", [A,B])])
+def polish_str( s):
+    tbl = { blk.nm : blk for blk in build_block()}
+    return polish( [tbl.get(c, c) for c in s])
 
-def build_block1():
-    A, B, C, D = build_block()
-    return block_h( "top", [block_v( "mid", [B,A]), C, D])
+blocks = [ polish_str( 'vhCDhAB'),
+           polish_str( 'hhvBACD'),
+           polish_str( 'hvvDBAC'),
+           polish_str( 'vvvDCBA'),
+           polish_str( 'hAhBhCD')
+]
 
-def build_block2():
-    A, B, C, D = build_block()
-    return block_h( "top", [block_v( "mid", [D,B,A]), C])
+blocks = [ polish_str(s) for s in all_possible_polish_strings("ABCDE")]
 
-def build_block3():
-    A, B, C, D = build_block()
-    return block_v( "top", [D,C,B,A])
+logging.info( f'Generated {len(blocks)} polish strings...')
 
-def build_block4orig():
-    A, B, C, D = build_block()
-    return block_h( "top", [A,B,C,D])
-
-def build_block4alt0():
-    A, B, C, D = build_block()
-    return block_h( "top", [block_h( "mid0", [A,B]), block_h( "mid1", [C,D])])
-
-def build_block4():
-    A, B, C, D = build_block()
-    return block_h( "top", [A, block_h( "mid0", [B,block_h( "mid1", [C,D])])])
-
-blocks = [ build_block0(), build_block1(), build_block2(), build_block3(), build_block4()]
 for blk in blocks:
     blk.update_bbox()
 
+logging.info( f'Resolving coordinates...')
+
 placements = [ list(blk.gen_rects( Tr())) for blk in blocks]
 
-pairs = [ [blk.urx,blk.ury] for blk in blocks]
+logging.info( f'Generating placements (rectangle lists)...')
+
+pairs = [ (random.gauss(blk.urx,.1),random.gauss(blk.ury,0.1)) for blk in blocks]
+
+histo = defaultdict(list)
+for blk in blocks:
+    histo[(blk.urx,blk.ury)].append(blk)
+
+logging.info( f'histo: {[(k, len(v)) for k,v in histo.items()]}')
 
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
@@ -165,7 +216,7 @@ df = pd.DataFrame( data=pairs, columns=['width','height'])
 
 fig = px.scatter(df, x="width", y="height", width=600, height=600)
 
-fig.update_traces( marker=dict(size=12))
+fig.update_traces( marker=dict(size=3))
 fig.update_xaxes( rangemode="tozero")
 fig.update_yaxes( rangemode="tozero")
 
@@ -198,12 +249,15 @@ def display_hover_data(hoverData):
     assert 1 == len(points)
     idx = points[0]['pointNumber']
 
+    colors = {'A': 'Plum', 'B': 'Khaki', 'C': 'SpringGreen', 'D': 'Salmon', 'E': 'SteelBlue'}
+
     for named_rect in placements[idx]:
         nm, [x0, y0, x1, y1] = named_rect
         x = [x0, x1, x1, x0, x0]
         y = [y0, y0, y1, y1, y0]
         fig.add_trace( go.Scatter(x=x, y=y,
                                    mode='lines', fill='toself',
+                                   fillcolor=colors[nm],
                                    showlegend=False,
                                    name=f'{nm}'))
 
