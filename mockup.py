@@ -12,6 +12,9 @@ import pandas as pd
 from transformation import Transformation as Tr
 from transformation import Rect
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 class Block:
     def __init__(self, nm, *, w=None, h=None):
         self.nm = nm
@@ -24,12 +27,59 @@ class Block:
         self.axis = None
         self.alignment = None
 
+    def add_constraint( self, blks, axis, alignment):
+        self.children = blks
+        self.axis = axis
+        self.alignment = alignment
+        self.transformations = None
+
     def add_child( self, blk, tr):
         self.children.append( blk)
         self.transformations.append( tr)
 
     def update_bbox(self):
         if self.children:
+            for blk in self.children:
+                blk.update_bbox()
+                assert 0 == blk.llx
+                assert 0 == blk.lly
+
+            if self.axis is not None:
+                assert self.alignment is not None
+                M = None
+                if self.axis == 'h':
+                    for blk in self.children:
+                        cand = blk.ury - blk.lly
+                        if M is None or cand > M: M = cand
+                    
+                    x = 0
+                    self.transformations = []
+                    for blk in self.children:
+                        if self.alignment == 'b':
+                            self.transformations.append( Tr(oX=x))
+                        elif self.alignment == 't':
+                            self.transformations.append( Tr(oX=x,oY=M-blk.ury))
+                        else:
+                            assert False, self.alignment
+                        x += blk.urx
+                elif self.axis == 'v':
+                    for blk in self.children:
+                        cand = blk.urx - blk.llx
+                        if M is None or cand > M: M = cand
+                    
+                    y = 0
+                    self.transformations = []
+                    for blk in self.children:
+                        if self.alignment == 'l':
+                            self.transformations.append( Tr(oY=y))
+                        elif self.alignment == 'r':
+                            self.transformations.append( Tr(oX=M-blk.urx,oY=y))
+                        else:
+                            assert False, self.alignment
+                        y += blk.ury
+                else:
+                    assert False, self.axis
+
             self.llx, self.lly, self.urx, self.ury = None, None, None, None
             for (blk, local_tr) in zip(self.children,self.transformations):
                 blk.update_bbox()
@@ -47,70 +97,60 @@ class Block:
             tr = global_tr.postMult(local_tr)
             yield from blk.gen_rects( tr)
 
+def block_v( nm, blks, alignment='l'):
+    mid = Block(nm)
+    mid.add_constraint( blks, 'v', alignment)
+    return mid
+
+def block_h( nm, blks, alignment='b'):
+    mid = Block(nm)
+    mid.add_constraint( blks, 'h', alignment)
+    return mid
+
+def polish( expr):
+    """
+    [ 'v', 'h', C, D, 'h', A, B]
+"""
+    
+
+def build_block():
+    A = Block( "A", w=2, h=3)
+    B = Block( "B", w=3, h=4)
+    C = Block( "C", w=3, h=8)
+    D = Block( "D", w=2, h=1)
+    return A, B, C, D
+
 def build_block0():
-    top = Block("top")
-
-    """(C|D)-(A|B)"""
-    top.add_child( Block( "A", w=2, h=3), Tr(oX=0,oY=0))
-    top.add_child( Block( "B", w=3, h=4), Tr(oX=2,oY=0))
-    top.add_child( Block( "C", w=3, h=8), Tr(oX=0,oY=4))
-    top.add_child( Block( "D", w=2, h=1), Tr(oX=3,oY=4))
-
-    top.update_bbox()
-    return top
+    A, B, C, D = build_block()
+    return block_v( "top", [block_h( "mid0", [C,D]),block_h( "mid1", [A,B])])
 
 def build_block1():
-    top = Block("top")
-
-    """(B-A)|C|D"""
-    top.add_child( Block( "A", w=2, h=3), Tr(oX=0,oY=0))
-    top.add_child( Block( "B", w=3, h=4), Tr(oX=0,oY=3))
-    top.add_child( Block( "C", w=3, h=8), Tr(oX=3,oY=0))
-    top.add_child( Block( "D", w=2, h=1), Tr(oX=6,oY=0))
-
-    top.update_bbox()
-    return top
+    A, B, C, D = build_block()
+    return block_h( "top", [block_v( "mid", [B,A]), C, D])
 
 def build_block2():
-    top = Block("top")
-
-    """(D-B-A)|C"""
-    top.add_child( Block( "A", w=2, h=3), Tr(oX=0,oY=0))
-    top.add_child( Block( "B", w=3, h=4), Tr(oX=0,oY=3))
-    top.add_child( Block( "C", w=3, h=8), Tr(oX=3,oY=0))
-    top.add_child( Block( "D", w=2, h=1), Tr(oX=0,oY=7))
-
-    top.update_bbox()
-    return top
+    A, B, C, D = build_block()
+    return block_h( "top", [block_v( "mid", [D,B,A]), C])
 
 def build_block3():
-    top = Block("top")
+    A, B, C, D = build_block()
+    return block_v( "top", [D,C,B,A])
 
-    """D-C-B-A"""
-    top.add_child( Block( "A", w=2, h=3), Tr(oX=0,oY=0))
-    top.add_child( Block( "B", w=3, h=4), Tr(oX=0,oY=3))
-    top.add_child( Block( "C", w=3, h=8), Tr(oX=0,oY=7))
-    top.add_child( Block( "D", w=2, h=1), Tr(oX=0,oY=15))
+def build_block4orig():
+    A, B, C, D = build_block()
+    return block_h( "top", [A,B,C,D])
 
-    top.update_bbox()
-    return top
+def build_block4alt0():
+    A, B, C, D = build_block()
+    return block_h( "top", [block_h( "mid0", [A,B]), block_h( "mid1", [C,D])])
 
 def build_block4():
-    top = Block("top")
+    A, B, C, D = build_block()
+    return block_h( "top", [A, block_h( "mid0", [B,block_h( "mid1", [C,D])])])
 
-    """A|B|C|D"""    
-    top.add_child( Block( "A", w=2, h=3), Tr(oX=0,oY=0))
-    top.add_child( Block( "B", w=3, h=4), Tr(oX=2,oY=0))
-    top.add_child( Block( "C", w=3, h=8), Tr(oX=5,oY=0))
-    top.add_child( Block( "D", w=2, h=1), Tr(oX=8,oY=0))
-
-    top.update_bbox()
-    return top
-
-def test_Block():
-    print( build_block0())
-
-blocks = [build_block0(), build_block1(), build_block2(), build_block3(), build_block4()]
+blocks = [ build_block0(), build_block1(), build_block2(), build_block3(), build_block4()]
+for blk in blocks:
+    blk.update_bbox()
 
 placements = [ list(blk.gen_rects( Tr())) for blk in blocks]
 
