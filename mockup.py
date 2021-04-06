@@ -94,8 +94,8 @@ class Block:
 
 
     def gen_rects( self, global_tr):
-        if not self.children:
-            yield self.nm, global_tr.hitRect( Rect(ll=(self.llx,self.lly), ur=(self.urx,self.ury))).canonical().toList()
+        if True or not self.children:
+            yield self.nm, tuple(global_tr.hitRect( Rect(ll=(self.llx,self.lly), ur=(self.urx,self.ury))).canonical().toList())
         for (blk, local_tr) in zip(self.children,self.transformations):
             tr = global_tr.postMult(local_tr)
             yield from blk.gen_rects( tr)
@@ -110,26 +110,58 @@ def block_h( nm, blks, alignment='b'):
     mid.add_constraint( blks, 'h', alignment)
     return mid
 
+def polish2tree( expr):
+
+    s = ''
+
+    def aux( idx, lvl):
+        nonlocal s
+
+        s += f'{" "*(2*lvl)}{expr[idx]}'
+        s += '\n'
+    
+        new_idx = idx+1
+        if expr[idx] in 'vh':
+            new_idx = aux( new_idx, lvl+1)
+            new_idx = aux( new_idx, lvl+1)
+
+        return new_idx
+
+    assert len(expr) == aux( 0, 0)
+
+    return s
+
+def test_polish2tree():
+    print( polish2tree( 'vhCDhAB'))
+    
+
 def polish( expr):
     """
     [ 'v', 'h', C, D, 'h', A, B]
 """
     stack = []
-    for idx,x in reversed(list(enumerate(expr))):
+    # n is the number of leaves, n-1 the number of operators
+    n = (len(expr)+1)//2
+    # index to generate operator labels
+    idx = n-2
+    for x in reversed(expr):
         if x == 'v' or x == 'h':
-            assert len(stack) >= 2
+            assert len(stack) >= 2, stack
             e0 = stack.pop()
             e1 = stack.pop()
             if x == 'v':
+                # why do I have to reverse the list elements?
                 stack.append( block_v( f'w{idx}', [e1,e0]))
             elif x == 'h':
                 stack.append( block_h( f'w{idx}', [e0,e1]))
             else:
                 assert False, x
+            idx -= 1
         else:
             stack.append( x)
     
     assert 1 == len(stack)
+    assert -1 == idx
     return stack[0]
 
 def all_possible_trees(n):
@@ -140,6 +172,18 @@ def all_possible_trees(n):
         gen_right = all_possible_trees(n-split)
         for left, right in itertools.product(gen_left, gen_right):
             yield 'o' + left + right
+
+def is_normalized( r):
+    return all( c != lastc or (c not in 'hv') for lastc, c in zip(r[:-1],r[1:]))
+
+def test_is_normalized():
+    assert is_normalized( "")
+    assert is_normalized( "v")
+    assert is_normalized( "ll")
+    assert is_normalized( "vhvh")
+    assert not is_normalized( "vhvv")
+    assert not is_normalized( "vvhv")
+
 
 def all_possible_polish_strings(s):
     n = len(s)
@@ -160,7 +204,8 @@ def all_possible_polish_strings(s):
         assert i1 == len(os)
         assert i2 == len(ls)
 
-        yield r
+        if is_normalized(r):
+            yield r
 
 def test_A():
     lst = list(all_possible_polish_strings("ABCD"))
@@ -173,20 +218,17 @@ def build_block():
     C = Block( "C", w=3, h=8)
     D = Block( "D", w=2, h=1)
     E = Block( "E", w=4, h=7)
-    return A, B, C, D, E
+    F = Block( "F", w=3, h=2)
+    return A, B, C, D, E, F
 
 def polish_str( s):
     tbl = { blk.nm : blk for blk in build_block()}
     return polish( [tbl.get(c, c) for c in s])
 
-blocks = [ polish_str( 'vhCDhAB'),
-           polish_str( 'hhvBACD'),
-           polish_str( 'hvvDBAC'),
-           polish_str( 'vvvDCBA'),
-           polish_str( 'hAhBhCD')
-]
+#polish_strs = ['vhvCBhDEA', 'vhvChBDEA']
+polish_strs = list(all_possible_polish_strings("ABCD"))
 
-blocks = [ polish_str(s) for s in all_possible_polish_strings("ABCDE")]
+blocks = [ polish_str(s) for s in polish_strs]
 
 logging.info( f'Generated {len(blocks)} polish strings...')
 
@@ -196,10 +238,25 @@ for blk in blocks:
 logging.info( f'Resolving coordinates...')
 
 placements = [ list(blk.gen_rects( Tr())) for blk in blocks]
+sigma = 0.1
+
+common_placements = defaultdict(list)
+for s,blk in zip(polish_strs,blocks):
+    p = frozenset(blk.gen_rects(Tr()))
+    common_placements[p].append(s)
+
+logging.info( f'{len(placements)=} {len(common_placements)=}')
+
+for k,v in common_placements.items():
+    if len(v) > 1:
+        print( k, v)
 
 logging.info( f'Generating placements (rectangle lists)...')
 
-pairs = [ (random.gauss(blk.urx,.1),random.gauss(blk.ury,0.1)) for blk in blocks]
+pairs = [ (random.gauss(blk.urx,sigma),random.gauss(blk.ury,sigma)) for blk in blocks]
+
+max_x = max( blk.urx for blk in blocks)
+max_y = max( blk.ury for blk in blocks)
 
 histo = defaultdict(list)
 for blk in blocks:
@@ -217,24 +274,64 @@ df = pd.DataFrame( data=pairs, columns=['width','height'])
 fig = px.scatter(df, x="width", y="height", width=600, height=600)
 
 fig.update_traces( marker=dict(size=3))
-fig.update_xaxes( rangemode="tozero")
-fig.update_yaxes( rangemode="tozero")
+fig.update_xaxes(
+    rangemode="tozero"
+)
+fig.update_yaxes(
+    rangemode="tozero",
+    scaleanchor='x',
+    scaleratio = 1
+)
 
-app.layout = html.Div([
-    html.Div([
-        html.H2(children='Pareto Frontier'),
-        dcc.Graph(
-            id='width-vs-height',
-            figure=fig
+app.layout = html.Div(
+    id='frame',
+    children=[
+        html.Div(
+            children=[
+                html.H2(children='Pareto Frontier'),
+                dcc.Graph(
+                    id='width-vs-height',
+                    figure=fig
+                )
+            ],
+            style={'display': 'inline-block', 'vertical-align': 'top'}
+        ),
+        html.Div(
+            children=[    
+                html.H2(children='Placement'),
+                dcc.Graph(
+                    id='Placement',
+                    figure = go.Figure()
+                )
+            ],
+            style={'display': 'inline-block', 'vertical-align': 'top'}
+        ),
+        html.Div(
+            children=[    
+                html.H2(children='Tree'),
+                dcc.Markdown(children='',id='Tree')
+            ],
+            style={'display': 'inline-block', 'vertical-align': 'top'}
         )
-    ], style={'display': 'inline-block'}),
-    html.Div([    
-        html.H2(children='Placement'),
-        dcc.Graph(
-            id='Placement'
-        )
-    ], style={'display': 'inline-block'})
-])
+    ]
+)
+
+@app.callback(
+    Output('Tree', 'children'),
+    Input('width-vs-height', 'hoverData'))
+def display_hover_data(hoverData):
+    if hoverData is None:
+        return ''
+    
+    points = hoverData['points']
+    assert 1 == len(points)
+    idx = points[0]['pointNumber']
+
+    return f"""```
+{polish2tree(polish_strs[idx])}
+```
+"""
+
 
 @app.callback(
     Output('Placement', 'figure'),
@@ -249,7 +346,14 @@ def display_hover_data(hoverData):
     assert 1 == len(points)
     idx = points[0]['pointNumber']
 
-    colors = {'A': 'Plum', 'B': 'Khaki', 'C': 'SpringGreen', 'D': 'Salmon', 'E': 'SteelBlue'}
+    colors = {'A': 'Plum', 'B': 'Khaki', 'C': 'SpringGreen', 'D': 'Salmon', 'E': 'SteelBlue', 'F': 'yellow',
+              'w0': 'rgb( 255, 255, 255)',
+              'w1': 'rgb( 240, 255, 255)',
+              'w2': 'rgb( 255, 240, 255)',
+              'w3': 'rgb( 255, 255, 240)',
+              'w3': 'rgb( 255, 240, 240)'}
+
+
 
     for named_rect in placements[idx]:
         nm, [x0, y0, x1, y1] = named_rect
@@ -257,20 +361,26 @@ def display_hover_data(hoverData):
         y = [y0, y0, y1, y1, y0]
         fig.add_trace( go.Scatter(x=x, y=y,
                                    mode='lines', fill='toself',
-                                   fillcolor=colors[nm],
+                                   fillcolor=colors.get(nm,'yellow'),
                                    showlegend=False,
                                    name=f'{nm}'))
-
-    fig.update_yaxes(
-        scaleanchor='x',
-        scaleratio = 1
-    )
 
     fig.update_layout(
         autosize=False,
         width=600,
         height=600
     )
+
+    fig.update_xaxes(
+        tickvals=[0,max_x],
+        range=[0,max(max_x,max_y)]
+    )
+
+    fig.update_yaxes(
+        tickvals=[0,max_y],
+        range=[0,max(max_x,max_y)]
+    )
+
 
     return fig
 
