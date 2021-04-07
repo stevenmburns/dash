@@ -265,6 +265,51 @@ for blk in blocks:
 logging.info( f'histo: {[(k, len(v)) for k,v in histo.items()]}')
 
 
+def make_placement_graph(idx):
+    fig = go.Figure()
+
+    if idx is None:
+        return fig
+
+    colors = {'A': 'Plum', 'B': 'Khaki', 'C': 'SpringGreen', 'D': 'Salmon', 'E': 'SteelBlue', 'F': 'yellow',
+              'w0': 'rgb( 255, 255, 255)',
+              'w1': 'rgb( 240, 255, 255)',
+              'w2': 'rgb( 255, 240, 255)',
+              'w3': 'rgb( 255, 255, 240)',
+              'w3': 'rgb( 255, 240, 240)'}
+
+
+
+
+    for named_rect in placements[idx]:
+        nm, [x0, y0, x1, y1] = named_rect
+        x = [x0, x1, x1, x0, x0]
+        y = [y0, y0, y1, y1, y0]
+        fig.add_trace( go.Scatter(x=x, y=y,
+                                   mode='lines', fill='toself',
+                                   fillcolor=colors.get(nm,'yellow'),
+                                   showlegend=False,
+                                   name=f'{nm}'))
+
+    fig.update_layout(
+        autosize=False,
+        width=600,
+        height=600
+    )
+
+    fig.update_xaxes(
+        tickvals=[0,max_x],
+        range=[0,max(max_x,max_y)]
+    )
+
+    fig.update_yaxes(
+        tickvals=[0,max_y],
+        range=[0,max(max_x,max_y)]
+    )
+
+    return fig
+
+
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
@@ -301,7 +346,7 @@ app.layout = html.Div(
                 html.H2(children='Placement'),
                 dcc.Graph(
                     id='Placement',
-                    figure = go.Figure()
+                    figure = make_placement_graph(0)
                 )
             ],
             style={'display': 'inline-block', 'vertical-align': 'top'}
@@ -316,73 +361,31 @@ app.layout = html.Div(
     ]
 )
 
-@app.callback(
-    Output('Tree', 'children'),
-    Input('width-vs-height', 'hoverData'))
-def display_hover_data(hoverData):
-    if hoverData is None:
-        return ''
-    
-    points = hoverData['points']
-    assert 1 == len(points)
-    idx = points[0]['pointNumber']
-
-    return f"""```
-{polish2tree(polish_strs[idx])}
-```
-"""
 
 
 @app.callback(
     Output('Placement', 'figure'),
+    Output('Tree', 'children'),
     Input('width-vs-height', 'hoverData'))
 def display_hover_data(hoverData):
-    fig = go.Figure()
+    idx = None
+    md_str = ''
 
-    if hoverData is None:
-        return fig
+    if hoverData is not None:
+        points = hoverData['points']
+        assert 1 == len(points)
+        idx = points[0]['pointNumber']
 
-    points = hoverData['points']
-    assert 1 == len(points)
-    idx = points[0]['pointNumber']
+        md_str = f"""```
+{polish2tree(polish_strs[idx])}
+```
+"""
+    fig = make_placement_graph(idx)
 
-    colors = {'A': 'Plum', 'B': 'Khaki', 'C': 'SpringGreen', 'D': 'Salmon', 'E': 'SteelBlue', 'F': 'yellow',
-              'w0': 'rgb( 255, 255, 255)',
-              'w1': 'rgb( 240, 255, 255)',
-              'w2': 'rgb( 255, 240, 255)',
-              'w3': 'rgb( 255, 255, 240)',
-              'w3': 'rgb( 255, 240, 240)'}
-
-
-
-    for named_rect in placements[idx]:
-        nm, [x0, y0, x1, y1] = named_rect
-        x = [x0, x1, x1, x0, x0]
-        y = [y0, y0, y1, y1, y0]
-        fig.add_trace( go.Scatter(x=x, y=y,
-                                   mode='lines', fill='toself',
-                                   fillcolor=colors.get(nm,'yellow'),
-                                   showlegend=False,
-                                   name=f'{nm}'))
-
-    fig.update_layout(
-        autosize=False,
-        width=600,
-        height=600
-    )
-
-    fig.update_xaxes(
-        tickvals=[0,max_x],
-        range=[0,max(max_x,max_y)]
-    )
-
-    fig.update_yaxes(
-        tickvals=[0,max_y],
-        range=[0,max(max_x,max_y)]
-    )
+    return fig, md_str
 
 
-    return fig
+
 
 
 if __name__ == '__main__':
