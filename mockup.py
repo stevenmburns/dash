@@ -18,6 +18,18 @@ from collections import defaultdict
 import logging
 logging.basicConfig(level=logging.INFO)
 
+import argparse
+
+assert __name__ == '__main__'
+
+parser = argparse.ArgumentParser( description='Mockup of ALIGN UI')
+parser.add_argument( '-s', '--block_str', type=str, default='ABCD', help='Blocks to use in enumeration; must only include the characters "ABCEDF"; strings longer than 5 will take a long time')
+
+args = parser.parse_args()
+
+block_str = args.block_str
+
+
 class Block:
     def __init__(self, nm, *, w=None, h=None):
         self.nm = nm
@@ -225,47 +237,49 @@ def polish_str( s):
     tbl = { blk.nm : blk for blk in build_block()}
     return polish( [tbl.get(c, c) for c in s])
 
-#polish_strs = ['vhvCBhDEA', 'vhvChBDEA']
-polish_strs = list(all_possible_polish_strings("ABCD"))
+def check_for_common_placements( blocks, placements):
 
-blocks = [ polish_str(s) for s in polish_strs]
+    common_placements = defaultdict(list)
+    for s,blk in blocks.items():
+        p = frozenset(blk.gen_rects(Tr()))
+        common_placements[p].append(s)
+
+    logging.info( f'{len(placements)=} {len(common_placements)=}')
+
+    for k,v in common_placements.items():
+        if len(v) > 1:
+            print( k, v)
+
+    return common_placements
+
+polish_strs = list(all_possible_polish_strings(block_str))
+
+blocks = { s : polish_str(s) for s in polish_strs}
 
 logging.info( f'Generated {len(blocks)} polish strings...')
 
-for blk in blocks:
+for s,blk in blocks.items():
     blk.update_bbox()
+logging.info( f'Resolved coordinates...')
 
-logging.info( f'Resolving coordinates...')
+placements = { s : list(blk.gen_rects( Tr())) for s,blk in blocks.items()}
+logging.info( f'Generated placements (rectangle lists)...')
 
-placements = [ list(blk.gen_rects( Tr())) for blk in blocks]
-sigma = 0.1
-
-common_placements = defaultdict(list)
-for s,blk in zip(polish_strs,blocks):
-    p = frozenset(blk.gen_rects(Tr()))
-    common_placements[p].append(s)
-
-logging.info( f'{len(placements)=} {len(common_placements)=}')
-
-for k,v in common_placements.items():
-    if len(v) > 1:
-        print( k, v)
-
-logging.info( f'Generating placements (rectangle lists)...')
-
-pairs = [ (random.gauss(blk.urx,sigma),random.gauss(blk.ury,sigma)) for blk in blocks]
-
-max_x = max( blk.urx for blk in blocks)
-max_y = max( blk.ury for blk in blocks)
+check_for_common_placements( blocks, placements)
+logging.info( f'Checked for common placements...')
 
 histo = defaultdict(list)
-for blk in blocks:
-    histo[(blk.urx,blk.ury)].append(blk)
+for s,blk in blocks.items():
+    histo[(blk.urx,blk.ury)].append(s)
 
-logging.info( f'histo: {[(k, len(v)) for k,v in histo.items()]}')
+pairs = list(histo.keys())
 
+max_x = max( p[0] for p in pairs)
+max_y = max( p[1] for p in pairs)
 
-def make_placement_graph(idx):
+logging.debug( f'histo: {histo}')
+
+def make_placement_graph(idx,subindex):
     fig = go.Figure()
 
     if idx is None:
@@ -276,12 +290,11 @@ def make_placement_graph(idx):
               'w1': 'rgb( 240, 255, 255)',
               'w2': 'rgb( 255, 240, 255)',
               'w3': 'rgb( 255, 255, 240)',
-              'w3': 'rgb( 255, 240, 240)'}
+              'w4': 'rgb( 255, 240, 240)'}
 
+    s = histo[pairs[idx]][subindex]
 
-
-
-    for named_rect in placements[idx]:
+    for named_rect in placements[s]:
         nm, [x0, y0, x1, y1] = named_rect
         x = [x0, x1, x1, x0, x0]
         y = [y0, y0, y1, y1, y0]
@@ -293,8 +306,8 @@ def make_placement_graph(idx):
 
     fig.update_layout(
         autosize=False,
-        width=600,
-        height=600
+        width=800,
+        height=800
     )
 
     fig.update_xaxes(
@@ -316,9 +329,9 @@ app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
 df = pd.DataFrame( data=pairs, columns=['width','height'])
 
-fig = px.scatter(df, x="width", y="height", width=600, height=600)
+fig = px.scatter(df, x="width", y="height", width=800, height=800)
 
-fig.update_traces( marker=dict(size=3))
+fig.update_traces( marker=dict(size=10))
 fig.update_xaxes(
     rangemode="tozero"
 )
@@ -346,7 +359,7 @@ app.layout = html.Div(
                 html.H2(children='Placement'),
                 dcc.Graph(
                     id='Placement',
-                    figure = make_placement_graph(0)
+                    figure = make_placement_graph(0,0)
                 )
             ],
             style={'display': 'inline-block', 'vertical-align': 'top'}
@@ -361,32 +374,46 @@ app.layout = html.Div(
     ]
 )
 
-
+subindex = 0
+prev_idx = None
 
 @app.callback(
     Output('Placement', 'figure'),
     Output('Tree', 'children'),
-    Input('width-vs-height', 'hoverData'))
-def display_hover_data(hoverData):
+    Output('width-vs-height', 'clickData'),
+    Input('width-vs-height', 'clickData'))
+def display_hover_data(clickData):
+    global subindex
+    global prev_idx
+
     idx = None
     md_str = ''
 
-    if hoverData is not None:
-        points = hoverData['points']
+    if clickData is not None:
+        points = clickData['points']
         assert 1 == len(points)
         idx = points[0]['pointNumber']
 
-        md_str = f"""```
-{polish2tree(polish_strs[idx])}
+        lst = histo[pairs[idx]]
+
+        if prev_idx != idx:
+            subindex = 0
+        else:
+            subindex = (subindex+1)%len(lst)
+        ps = lst[subindex]
+        prev_idx = idx
+
+        md_str = f"""```text
+{polish2tree(ps)}
+
+Polish: {ps}
+Coord: {pairs[idx]}
+Subindex: {subindex}/{len(lst)}
 ```
 """
-    fig = make_placement_graph(idx)
 
-    return fig, md_str
+    fig = make_placement_graph(idx, subindex)
 
+    return fig, md_str, None
 
-
-
-
-if __name__ == '__main__':
-    app.run_server(debug=True)
+app.run_server(debug=True)
